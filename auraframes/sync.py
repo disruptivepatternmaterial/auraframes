@@ -7,11 +7,11 @@ a frame's assets into upload / delete / unchanged against local hashes --
 both remain pure, no I/O beyond reading local file bytes, no mutation.
 
 `execute_plan()` is this module's ONLY mutating function -- the sole place
-that calls select_asset/S3 upload/batch_update (for `to_upload`) and
-remove_asset (for `to_delete`). It never references the hard-delete
-primitive (the other, non-frame-scoped Asset removal call on `AssetApi`);
-the delete loop calls `remove_asset` exclusively (D-06 structural
-isolation, grep-verified absent from this module including comments).
+that calls select_asset/S3 upload/batch_update (for `to_upload`) and the
+chosen removal primitive (for `to_delete`). Default `removal_mode='hide'`
+calls `exclude_asset`. `'delete'` calls `remove_asset`. `'hard_delete'`
+calls `delete_asset`. The destructive primitives are unreachable unless a
+caller names them.
 Uploads are attempted before any delete (D-09), and a single item's
 failure is caught, recorded with its identity, and the loop continues
 rather than aborting (D-08), with results reported back as a separated
@@ -305,6 +305,10 @@ class ExecutionResult:
     upload_failures: list = field(default_factory=list)  # list[tuple[Path, str]]
     delete_failures: list = field(default_factory=list)  # list[tuple[str, str]]
     reshow_failures: list = field(default_factory=list)  # list[tuple[str, str]]
+    # Ids this call actually created, from batch_update successes[].id.
+    # Never infer by md5 — that would adopt a pre-existing photo with the
+    # same bytes.
+    upload_ids: list = field(default_factory=list)  # list[tuple[Path, str]]
 
 
 # The three tiers of "this photo is no longer wanted locally" (D-01/D-03).
@@ -602,15 +606,25 @@ def execute_plan(plan: SyncPlan, aura, frame_id: str, *, s3_client, sqs_client,
 
             throttle()
             _, successes = aura.asset_api.batch_update([partial for (_, _, partial) in prepped])
-            succeeded = {s.local_identifier for s in successes}
+            succeeded = {
+                s.local_identifier: s.id
+                for s in successes
+                if s.local_identifier
+            }
 
             for path, local_identifier, _ in prepped:
-                if local_identifier in succeeded:
+                asset_id = succeeded.get(local_identifier)
+                if asset_id:
                     result.upload_succeeded += 1
+                    result.upload_ids.append((path, asset_id))
                     consecutive_failures = 0
                     progress('upload', path, True)
                 else:
-                    reason = 'file not acknowledged in batch_update successes'
+                    reason = (
+                        'file not acknowledged in batch_update successes'
+                        if local_identifier not in succeeded
+                        else 'batch_update success had no asset id'
+                    )
                     result.upload_failures.append((path, reason))
                     progress('upload', path, False)
                     note_failure(reason)

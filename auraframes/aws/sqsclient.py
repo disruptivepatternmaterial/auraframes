@@ -1,6 +1,6 @@
 import boto3
 
-from auraframes.aws.awsclient import AWSClient
+from auraframes.aws.awsclient import AWSClient, SESSION_CONFIG
 
 # TODO: May want to redact the pool ids -- read them in through config?
 SQS_IDENTITY_POOL_ID = 'us-east-1:98ccd0ff-69fe-4e9a-ad34-671b4381ab12'
@@ -15,10 +15,14 @@ class SQSClient(AWSClient):
 
     def auth(self, pool_id):
         super().auth(pool_id)
-        self.sqs_client = boto3.client('sqs', aws_access_key_id=self.credentials['AccessKeyId'],
-                                       aws_secret_access_key=self.credentials['SecretKey'],
-                                       aws_session_token=self.credentials['SessionToken'],
-                                       region_name=self.region_name)
+        self.sqs_client = boto3.client(
+            'sqs',
+            aws_access_key_id=self.credentials['AccessKeyId'],
+            aws_secret_access_key=self.credentials['SecretKey'],
+            aws_session_token=self.credentials['SessionToken'],
+            region_name=self.region_name,
+            config=SESSION_CONFIG,
+        )
 
     def get_queue_url(self, frame_id: str):
         return self.sqs_client.get_queue_url(QueueName=f'frame-{frame_id}-client').get('QueueUrl')

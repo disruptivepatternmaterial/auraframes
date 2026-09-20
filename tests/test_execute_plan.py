@@ -165,7 +165,49 @@ def test_execute_plan_happy_path_uploads_and_deletes(tmp_path):
     assert len(select_calls) == 1
     assert len(select_calls[0]) == 2
     assert len(batch_calls) == 1
-    assert len(batch_calls[0]) == 2
+    assert {path for path, _ in result.upload_ids} == {path_a, path_b}
+    assert all(asset_id.startswith('new-') for _, asset_id in result.upload_ids)
+    assert len({asset_id for _, asset_id in result.upload_ids}) == 2
+
+
+def test_execute_plan_records_upload_ids_only_from_success_ids(tmp_path):
+    """Manifest ownership must come from successes[].id, never from md5."""
+    path_a = tmp_path / 'a.jpg'
+    path_b = tmp_path / 'b.jpg'
+    _write_jpeg(path_a)
+    _write_jpeg(path_b)
+    plan = SyncPlan(to_upload=[path_a, path_b], to_delete=[])
+
+    aura = offline_aura(overrides=_default_overrides())
+
+    def _ids_from_successes(assets):
+        from auraframes.models.asset import AssetPartialId
+        items = assets if isinstance(assets, list) else [assets]
+        ids = [item.local_identifier for item in items]
+        successes = [
+            AssetPartialId(id=f'asset-{lid}', local_identifier=lid)
+            for lid in ids
+        ]
+        return ids, successes
+
+    aura.asset_api.batch_update = _ids_from_successes
+    result = execute_plan(
+        plan, aura, FRAME_ID,
+        s3_client=_FakeS3Client(), sqs_client=_FakeSQSClient(), sleep=lambda *_: None,
+    )
+
+    assert result.upload_succeeded == 2
+    assert {path for path, _ in result.upload_ids} == {path_a, path_b}
+    assert all(asset_id.startswith('asset-') for _, asset_id in result.upload_ids)
+
+
+def test_prep_upload_fails_closed_on_png(tmp_path):
+    from auraframes.sync import _prep_upload
+
+    path = tmp_path / 'x.png'
+    Image.new('RGB', (4, 4), (0, 255, 0)).save(path, format='PNG')
+    with pytest.raises(ValueError, match='Unsupported upload extension'):
+        _prep_upload(path, _FakeS3Client())
 
 
 def test_execute_plan_partial_batch_update_splits_upload_succeeded_and_failures(tmp_path):
@@ -207,6 +249,7 @@ def test_execute_plan_partial_batch_update_splits_upload_succeeded_and_failures(
     failed_path, message = result.upload_failures[0]
     assert failed_path == path_b
     assert 'not acknowledged' in message
+    assert {path for path, _ in result.upload_ids} == {path_a, path_c}
 
 
 def test_execute_plan_chunks_uploads_past_batch_size(tmp_path):

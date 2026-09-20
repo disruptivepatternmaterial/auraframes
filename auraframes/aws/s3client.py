@@ -3,7 +3,7 @@ import boto3
 import uuid
 import hashlib
 
-from auraframes.aws.awsclient import AWSClient
+from auraframes.aws.awsclient import AWSClient, SESSION_CONFIG
 
 BUCKET_KEY = 'images.senseapp.co'
 # TODO: May want to redact the pool ids -- read them in through config?
@@ -23,9 +23,13 @@ class S3Client(AWSClient):
 
     def auth(self, pool_id):
         super().auth(pool_id)
-        self.s3_client = boto3.client('s3', aws_access_key_id=self.credentials['AccessKeyId'],
-                                      aws_secret_access_key=self.credentials['SecretKey'],
-                                      aws_session_token=self.credentials['SessionToken'])
+        self.s3_client = boto3.client(
+            's3',
+            aws_access_key_id=self.credentials['AccessKeyId'],
+            aws_secret_access_key=self.credentials['SecretKey'],
+            aws_session_token=self.credentials['SessionToken'],
+            config=SESSION_CONFIG,
+        )
 
     def upload_file(self, data, extension):
         filename = f'{str(uuid.uuid4())}{extension}'
