@@ -2,7 +2,10 @@ import boto3
 import botocore
 
 SESSION_CONFIG = botocore.config.Config(
-    user_agent="aws-sdk-android/2.13.1 Linux/5.4.61-android11 Dalvik/2.1.0/0 en_US"
+    user_agent="aws-sdk-android/2.13.1 Linux/5.4.61-android11 Dalvik/2.1.0/0 en_US",
+    connect_timeout=10,
+    read_timeout=60,
+    retries={"max_attempts": 3, "mode": "standard"},
 )
 
 
@@ -13,7 +16,11 @@ class AWSClient:
         # boto3.set_stream_logger('', logging.DEBUG)
 
         self.region_name = region_name
-        self.cognito = boto3.client('cognito-identity', region_name=self.region_name)
+        self.cognito = boto3.client(
+            'cognito-identity',
+            region_name=self.region_name,
+            config=SESSION_CONFIG,
+        )
         if pool_id:
             self.auth(pool_id)
 
